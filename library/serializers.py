@@ -58,6 +58,17 @@ class BookSerializer(serializers.ModelSerializer):
             'total_copies', 'available_copies'
         ]
 
+    def validate(self, data):
+        total = data.get('total_copies', getattr(self.instance, 'total_copies', None))
+        available = data.get('available_copies', getattr(self.instance, 'available_copies', None))
+
+        if total is not None and available is not None and total < available:
+            raise serializers.ValidationError({
+                'available_copies': 'Available copies cannot exceed total copies.'
+            })
+
+        return data
+
 class BorrowSerializer(serializers.ModelSerializer):
     member_email = serializers.EmailField(source='member.email', read_only=True)
     book_detail = BookSerializer(source='book', read_only=True)
