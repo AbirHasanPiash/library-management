@@ -2,6 +2,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
+from datetime import date
 from .managers import MemberManager
 
 
@@ -60,6 +61,15 @@ class Borrow(models.Model):
     borrow_date = models.DateField()
     due_date = models.DateField()
     return_date = models.DateField(null=True, blank=True)
+    @property
+    def fine(self):
+        if self.return_date and self.return_date > self.due_date:
+            overdue_days = (self.return_date - self.due_date).days
+        elif not self.return_date and date.today() > self.due_date:
+            overdue_days = (date.today() - self.due_date).days
+        else:
+            overdue_days = 0
+        return overdue_days * 10
 
     def __str__(self):
         return f"{self.member.email} borrowed {self.book.title}"

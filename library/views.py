@@ -1,185 +1,124 @@
-from rest_framework import generics
-from .serializers import MemberRegistrationSerializer, MemberSerializer, BookSerializer,\
-    BookCreateSerializer, BookUpdateSerializer, AuthorSerializer, BorrowSerializer, \
-    ReturnBookSerializer, BorrowRecordSerializer, ReservationSerializer, \
-    CancelReservationSerializer, ReservationRecordSerializer, CategorySerializer
+from django_filters.rest_framework import DjangoFilterBackend
+from .serializers import MemberSerializer, AuthorSerializer, CategorySerializer, BookSerializer,\
+    BorrowSerializer, ReservationSerializer
 from .models import Member, Category, Book, Author, Borrow, Reservation
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.filters import SearchFilter
-from django.db.models import Q
-from rest_framework import status
-from django.utils import timezone
+from rest_framework import viewsets, permissions, filters
+from .permissions import IsAdminOrSelf
+from datetime import date
+from rest_framework.decorators import action
+from .permissions import IsAdminOrSelf, IsAdminOrReadOnly
 
-
-class MemberRegisterView(generics.CreateAPIView):
+class MemberViewSet(viewsets.ModelViewSet):
     queryset = Member.objects.all()
-    serializer_class = MemberRegistrationSerializer
+    serializer_class = MemberSerializer
+
+    def get_permissions(self):
+        if self.action in ['list', 'create', 'destroy']:
+            return [permissions.IsAdminUser()]
+        elif self.action == 'me':
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsAdminOrSelf()]
+
+    @action(detail=False, methods=['get', 'put'], url_path='me')
+    def me(self, request):
+        user = request.user
+        if request.method == 'GET':
+            serializer = self.get_serializer(user)
+            return Response(serializer.data)
+        elif request.method == 'PUT':
+            serializer = self.get_serializer(user, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
 
 
-class BookSearchView(generics.ListAPIView):
+class AuthorViewSet(viewsets.ModelViewSet):
+    queryset = Author.objects.all()
+    serializer_class = AuthorSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+
+class BookViewSet(viewsets.ModelViewSet):
     serializer_class = BookSerializer
-    filter_backends = [SearchFilter,]
-    search_fields = ['title', 'authors__first_name', 'authors__last_name', 'category__name']
+    permission_classes = [IsAdminOrReadOnly]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    
+    filterset_fields = ['category__name', 'authors__first_name', 'authors__last_name']
+    search_fields = ['title', 'authors__name', 'category__name']
+    ordering_fields = ['title', 'available_copies']
 
     def get_queryset(self):
-        query = self.request.query_params.get('query', '')
-        return Book.objects.filter(
-            Q(title__icontains=query) |
-            Q(authors__first_name__icontains=query) |
-            Q(authors__last_name__icontains=query) |
-            Q(category__name__icontains=query)
-        ).distinct()
+        return Book.objects.select_related('category').prefetch_related('authors')
 
 
-class CategoryListView(generics.ListAPIView):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-
-
-class CategoryCreateView(generics.CreateAPIView):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-    permission_classes = [IsAdminUser]
-
-
-class CategoryUpdateView(generics.UpdateAPIView):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-    permission_classes = [IsAdminUser]
-
-
-class CategoryDeleteView(generics.DestroyAPIView):
-    queryset = Category.objects.all()
-    permission_classes = [IsAdminUser]
-
-
-class MemberListView(generics.ListAPIView):
-    queryset = Member.objects.all()
-    serializer_class = MemberSerializer
-    permission_classes = [IsAdminUser]
-
-
-class MemberDetailView(generics.RetrieveAPIView):
-    queryset = Member.objects.all()
-    serializer_class = MemberSerializer
-    permission_classes = [IsAdminUser]
-
-
-class BookCreateView(generics.CreateAPIView):
-    queryset = Book.objects.all()
-    serializer_class = BookCreateSerializer
-    permission_classes = [IsAdminUser]
-
-
-class BookListView(generics.ListAPIView):
-    queryset = Book.objects.select_related('category').prefetch_related('authors')
-    serializer_class = BookSerializer
-
-
-class BookDetailView(generics.RetrieveAPIView):
-    queryset = Book.objects.all()
-    serializer_class = BookSerializer
-
-
-class BookUpdateView(generics.UpdateAPIView):
-    queryset = Book.objects.all()
-    serializer_class = BookUpdateSerializer
-    permission_classes = [IsAdminUser]
-
-
-class BookDeleteView(generics.DestroyAPIView):
-    queryset = Book.objects.all()
-    permission_classes = [IsAdminUser]
-
-
-class AuthorListView(generics.ListAPIView):
-    queryset = Author.objects.all()
-    serializer_class = AuthorSerializer
-
-
-class AuthorCreateView(generics.CreateAPIView):
-    queryset = Author.objects.all()
-    serializer_class = AuthorSerializer
-    permission_classes = [IsAdminUser]
-
-
-class AuthorDetailView(generics.RetrieveAPIView):
-    queryset = Author.objects.all()
-    serializer_class = AuthorSerializer
-
-
-class AuthorUpdateView(generics.UpdateAPIView):
-    queryset = Author.objects.all()
-    serializer_class = AuthorSerializer
-    permission_classes = [IsAdminUser]
-
-
-class AuthorDeleteView(generics.DestroyAPIView):
-    queryset = Author.objects.all()
-    permission_classes = [IsAdminUser]
-
-
-class BorrowBookView(generics.CreateAPIView):
+class BorrowViewSet(viewsets.ModelViewSet):
     serializer_class = BorrowSerializer
-    permission_classes = [IsAuthenticated]
-
-
-class ReturnBookView(generics.GenericAPIView):
-    serializer_class = ReturnBookSerializer
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        result = serializer.save()
-        return Response(result, status=status.HTTP_200_OK)
-    
-
-class BorrowListView(generics.ListAPIView):
-    queryset = Borrow.objects.select_related(
-        'book__category',
-        'member'
-    ).prefetch_related('book__authors')
-    serializer_class = BorrowRecordSerializer
-    permission_classes = [IsAdminUser]
-
-
-class MemberBorrowHistoryView(generics.ListAPIView):
-    serializer_class = BorrowRecordSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminOrSelf]
 
     def get_queryset(self):
-        member_id = self.kwargs['pk']
-        return Borrow.objects.filter(member_id=member_id)
-    
+        qs = Borrow.objects.select_related('member', 'book', 'book__category')\
+                        .prefetch_related('book__authors')
 
-class ReserveBookView(generics.CreateAPIView):
+        if self.request.user.is_staff:
+            return qs
+
+        if self.request.user.is_authenticated:
+            return qs.filter(member=self.request.user)
+
+        return Borrow.objects.none()
+
+    def perform_create(self, serializer):
+        if self.request.user.is_staff:
+            serializer.save()
+        else:
+            serializer.save(member=self.request.user)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def return_book(self, request, pk=None):
+        borrow = self.get_object()
+        if borrow.return_date:
+            return Response({"detail": "Book already returned."}, status=status.HTTP_400_BAD_REQUEST)
+
+        borrow.return_date = timezone.now().date()
+        borrow.book.available_copies += 1
+        borrow.book.save()
+        borrow.save()
+        return Response({"detail": "Book returned successfully."})
+    
+    @action(detail=False, methods=['get'], permission_classes=[IsAdminUser])
+    def overdue(self, request):
+        today = date.today()
+        overdue_borrows = Borrow.objects.filter(return_date__isnull=True, due_date__lt=today).select_related('book', 'member')
+        serializer = self.get_serializer(overdue_borrows, many=True)
+        return Response(serializer.data)
+
+
+class ReservationViewSet(viewsets.ModelViewSet):
     serializer_class = ReservationSerializer
-    permission_classes = [IsAuthenticated]
-
-
-class CancelReservationView(generics.GenericAPIView):
-    serializer_class = CancelReservationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        response_data = serializer.save()
-        return Response(response_data, status=status.HTTP_200_OK)
-    
-
-class ReservationListView(generics.ListAPIView):
-    queryset = Reservation.objects.all()
-    serializer_class = ReservationRecordSerializer
-    permission_classes = [IsAdminUser]
-
-
-class OverdueBooksView(generics.ListAPIView):
-    serializer_class = BorrowRecordSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated, IsAdminOrSelf]
 
     def get_queryset(self):
-        today = timezone.now().date()
-        return Borrow.objects.filter(return_date__isnull=True, due_date__lt=today)
+        qs = Reservation.objects.select_related('member', 'book', 'book__category')
+        if self.request.user.is_staff:
+            return qs
+        return qs.filter(member=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(member=self.request.user)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def cancel(self, request, pk=None):
+        reservation = self.get_object()
+        if not reservation.is_active:
+            return Response({"detail": "Reservation already canceled."}, status=status.HTTP_400_BAD_REQUEST)
+        reservation.is_active = False
+        reservation.save()
+        return Response({"detail": "Reservation canceled successfully."})
